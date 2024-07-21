@@ -1,5 +1,6 @@
 use actix_files::NamedFile;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, Result};
+use clap::Parser;
 use glob::glob;
 use rand::seq::SliceRandom;
 use std::fs::read_dir;
@@ -10,8 +11,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use walkdir::WalkDir;
 
+use clap;
 use serde::Deserialize;
-use structopt::StructOpt;
 
 #[derive(Debug, Clone)]
 struct Data {
@@ -19,55 +20,49 @@ struct Data {
     config: Config,
 }
 
-#[derive(Debug, Deserialize, StructOpt, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 struct Config {
-    #[structopt(short, long)]
     directory: String,
-
-    #[structopt(short, long)]
     ip_bind: String,
-
-    #[structopt(short, long)]
     port_bind: u16,
-    #[structopt(long)]
     trailer_factor: i8,
-    #[structopt(long)]
     poster_factor: i8,
-    #[structopt(long)]
     fanart_factor: i8,
-    #[structopt(long)]
     video_factor: i8,
 }
 
-#[derive(Debug, Deserialize, StructOpt)]
+#[derive(Debug, Deserialize, Parser)]
+#[clap(
+    name = "OptConfig",
+    about = "A configuration for the random video server."
+)]
 struct OptConfig {
-    #[structopt(short, long, help = "Kodi videos directory")]
+    #[arg(short, long, help = "Kodi videos directory")]
     directory: Option<String>,
 
-    #[structopt(
+    #[arg(
         short,
         long,
         help = "IP for bind. 127.0.0.1 for only same machine. 0.0.0.0 for global access (default: 127.0.0.1)"
     )]
     ip_bind: Option<String>,
 
-    #[structopt(short, long, help = "Port for bind (default: 3070)")]
+    #[arg(short, long, help = "Port for bind (default: 3070)")]
     port_bind: Option<u16>,
 
-    #[structopt(
+    #[arg(
         short,
         long,
-        parse(from_os_str),
         help = "Path to config file [default: $XDG_CONFIG_HOME/random_video_server/config.toml]"
     )]
     config: Option<PathBuf>,
-    #[structopt(long, help = "Show trailers N-times more likely (default: 1)")]
+    #[arg(long, help = "Show trailers N-times more likely (default: 1)")]
     trailer_factor: Option<i8>,
-    #[structopt(long, help = "Show posters N-times more likely (default: 1)")]
+    #[arg(long, help = "Show posters N-times more likely (default: 1)")]
     poster_factor: Option<i8>,
-    #[structopt(long, help = "Show fanart N-times more likely (default: 1)")]
+    #[arg(long, help = "Show fanart N-times more likely (default: 1)")]
     fanart_factor: Option<i8>,
-    #[structopt(long, help = "Show video N-times more likely (default: 0)")]
+    #[arg(long, help = "Show video N-times more likely (default: 0)")]
     video_factor: Option<i8>,
 }
 
@@ -512,7 +507,7 @@ async fn index() -> impl Responder {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Parse command line arguments
-    let args = OptConfig::from_args();
+    let args = OptConfig::parse();
 
     // Determine the config file path
     let default_config_path = dirs::config_dir()
