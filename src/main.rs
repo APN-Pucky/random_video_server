@@ -27,6 +27,7 @@ struct Config {
     port_bind: u16,
     trailer_factor: i8,
     poster_factor: i8,
+    thumb_factor: i8,
     fanart_factor: i8,
     video_factor: i8,
 }
@@ -60,6 +61,8 @@ struct OptConfig {
     trailer_factor: Option<i8>,
     #[arg(long, help = "Show posters N-times more likely (default: 1)")]
     poster_factor: Option<i8>,
+    #[arg(long, help = "Show thumb N-times more likely (default: 1)")]
+    thumb_factor: Option<i8>,
     #[arg(long, help = "Show fanart N-times more likely (default: 1)")]
     fanart_factor: Option<i8>,
     #[arg(long, help = "Show video N-times more likely (default: 0)")]
@@ -69,8 +72,9 @@ struct OptConfig {
 #[derive(Debug, Clone)]
 struct Movie {
     movie: PathBuf,
-    trailer: Option<PathBuf>,
-    poster: Option<PathBuf>,
+    trailer: Vec<PathBuf>,
+    poster: Vec<PathBuf>,
+    thumb: Vec<PathBuf>,
     fanarts: Vec<PathBuf>,
 }
 
@@ -79,6 +83,7 @@ enum PathType {
     Video,
     Trailer,
     Poster,
+    Thumb,
     Fanart,
 }
 
@@ -86,13 +91,18 @@ fn get_random_path(config: &Config, movie: &Movie) -> Option<(PathBuf, PathType)
     let mut paths = vec![];
 
     for _ in 0..config.trailer_factor {
-        if let Some(trailer) = &movie.trailer {
+        for trailer in &movie.trailer {
             paths.push((trailer.clone(), PathType::Trailer));
         }
     }
     for _ in 0..config.poster_factor {
-        if let Some(poster) = &movie.poster {
+        for poster in &movie.poster {
             paths.push((poster.clone(), PathType::Poster));
+        }
+    }
+    for _ in 0..config.thumb_factor {
+        for thumb in &movie.thumb {
+            paths.push((thumb.clone(), PathType::Thumb));
         }
     }
     for _ in 0..config.fanart_factor {
@@ -127,6 +137,39 @@ fn striped(root_dir: &String, p: PathBuf) -> Option<PathBuf> {
     p.strip_prefix(root_dir).ok().map(|p| p.to_path_buf())
 }
 
+fn try_files(root_dir: &String, ls: Vec<String>) -> Vec<PathBuf> {
+    let mut ret = Vec::new();
+    for l in ls {
+        if let Ok(entries) = glob(&l) {
+            for entry in entries {
+                if let Ok(path) = entry {
+                    if path.exists() {
+                        if let Some(r) = striped(root_dir, path) {
+                            ret.push(r);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ret
+}
+
+fn remove_extension(path: &Path) -> String {
+    if let Some(stem) = path.file_stem() {
+        // Append the file stem to an empty PathBuf
+        let mut new_path = PathBuf::from(stem);
+        // If the original path has parent directories, prepend them to the new path
+        if let Some(parent) = path.parent() {
+            new_path = parent.join(new_path);
+        }
+        new_path.to_string_lossy().to_string()
+    } else {
+        // If there is no file stem (path ends with .. or similar), return the original path
+        path.to_string_lossy().to_string()
+    }
+}
+
 fn load_movie_data(root_dir: &String) -> Vec<Movie> {
     let mut movies: Vec<Movie> = Vec::new();
 
@@ -142,7 +185,8 @@ fn load_movie_data(root_dir: &String) -> Vec<Movie> {
                     // Movies
                     for gl in [
                         &format!("{}/{}.{}", f.display(), name.to_string_lossy(), ext).to_string(),
-                        //&format!("{}/**/{}*.{}", f.display(), name.to_string_lossy(), ext) .to_string(),
+                        &format!("{}/**/{}*.{}", f.display(), name.to_string_lossy(), ext)
+                            .to_string(),
                     ] {
                         match glob(gl) {
                             Ok(entries) => {
@@ -151,78 +195,57 @@ fn load_movie_data(root_dir: &String) -> Vec<Movie> {
                                         // test that it does not end in -trailer
                                         if path.display().to_string().contains("-trailer") == false
                                         {
-                                            if let Some(movie) = striped(root_dir, path) {
-                                                let mut poster = None;
-                                                let tmp = f.join(format!(
-                                                    "{}{}",
-                                                    name.to_string_lossy(),
-                                                    "-poster.jpg"
-                                                ));
-                                                if tmp.exists() {
-                                                    poster = striped(root_dir, tmp);
-                                                }
-                                                let tmp2 = f.join(format!(
-                                                    "{}{}",
-                                                    name.to_string_lossy(),
-                                                    "-poster.png"
-                                                ));
-                                                if tmp2.exists() {
-                                                    poster = striped(root_dir, tmp2);
-                                                }
+                                            if let Some(movie) = striped(root_dir, path.clone()) {
+                                                let poster = try_files(
+                                                    root_dir,
+                                                    vec![
+                                                        remove_extension(&path) + &"-poster*.jpg",
+                                                        remove_extension(&path) + &"-poster*.png",
+                                                        //format!( "{}/{}{}",f.to_string_lossy(), name.to_string_lossy(), "-poster.jpg"),
+                                                        //format!( "{}/{}{}",f.to_string_lossy(), name.to_string_lossy(), "-poster.png"),
+                                                        //format!( "{}/{}",  f.to_string_lossy(),"poster.jpg"),
+                                                        //format!( "{}/{}",  f.to_string_lossy(),"poster.png"),
+                                                    ],
+                                                );
+                                                let thumb = try_files(
+                                                    root_dir,
+                                                    vec![
+                                                        remove_extension(&path) + &"-thumb*.jpg",
+                                                        remove_extension(&path) + &"-thumb*.png",
+                                                        //format!( "{}/{}{}",f.to_string_lossy(), name.to_string_lossy(), "-thumb.jpg"),
+                                                        //format!( "{}/{}{}", f.to_string_lossy(),name.to_string_lossy(), "-thumb.png"),
+                                                        //format!( "{}/{}", f.to_string_lossy(), "thumb.jpg"),
+                                                        //format!( "{}/{}", f.to_string_lossy(), "thumb.png"),
+                                                    ],
+                                                );
 
-                                                let mut trailer = None;
-                                                let tmp3 = f.join(format!(
-                                                    "{}{}",
-                                                    name.to_string_lossy(),
-                                                    "-trailer.mp4"
-                                                ));
-                                                if tmp3.exists() {
-                                                    trailer = striped(root_dir, tmp3);
-                                                }
+                                                let trailer = try_files(
+                                                    root_dir,
+                                                    vec![
+                                                        remove_extension(&path) + &"-trailer*.mp4",
+                                                        remove_extension(&path) + &"-trailer*.webm",
+                                                        //format!( "{}/{}{}", f.to_string_lossy(),name.to_string_lossy(), "-trailer.mp4"),
+                                                        //format!( "{}/{}{}",f.to_string_lossy(), name.to_string_lossy(), "-trailer.webm"),
+                                                        //format!( "{}/{}", f.to_string_lossy(), "trailer.mp4"),
+                                                        //format!( "{}/{}", f.to_string_lossy(), "trailer.webm"),
+                                                    ],
+                                                );
 
-                                                let extensions = vec!["jpg", "png"];
-                                                let fanarts: Vec<PathBuf> = WalkDir::new(f.clone())
-                                                    .into_iter()
-                                                    .filter_map(|e| e.ok())
-                                                    .filter(|e| e.path().is_file())
-                                                    // string contains ".actors" -> exclude
-                                                    .filter(|e| {
-                                                        e.path()
-                                                            .display()
-                                                            .to_string()
-                                                            .contains(".actors")
-                                                            == false
-                                                    })
-                                                    .filter(|e| {
-                                                        e.path()
-                                                            .display()
-                                                            .to_string()
-                                                            .contains("fanart")
-                                                    })
-                                                    // check path ends in extension
-                                                    .filter(|e| {
-                                                        for extension in &extensions {
-                                                            if e.path()
-                                                                .display()
-                                                                .to_string()
-                                                                .ends_with(extension)
-                                                            {
-                                                                return true;
-                                                            }
-                                                        }
-                                                        false
-                                                    })
-                                                    .map(|e| {
-                                                        e.path()
-                                                            .strip_prefix(root_dir)
-                                                            .ok()
-                                                            .expect("Should be in root dir")
-                                                            .to_path_buf()
-                                                    })
-                                                    .collect();
+                                                let fanarts = try_files(
+                                                    root_dir,
+                                                    vec![
+                                                        remove_extension(&path) + &"-fanart*.jpg",
+                                                        remove_extension(&path) + &"-fanart*.png",
+                                                        //format!( "{}/{}{}", f.to_string_lossy(),name.to_string_lossy(), "-trailer.mp4"),
+                                                        //format!( "{}/{}{}",f.to_string_lossy(), name.to_string_lossy(), "-trailer.webm"),
+                                                        //format!( "{}/{}", f.to_string_lossy(), "trailer.mp4"),
+                                                        //format!( "{}/{}", f.to_string_lossy(), "trailer.webm"),
+                                                    ],
+                                                );
 
                                                 movies.push(Movie {
                                                     movie,
+                                                    thumb,
                                                     poster,
                                                     trailer,
                                                     fanarts,
@@ -256,7 +279,7 @@ async fn grid(data: web::Data<Arc<Data>>) -> impl Responder {
     let image_tags: Vec<String> = random
         .map(|m| {
                 match get_random_path(&data.config,m) {
-                Some((path, PathType::Poster)) | Some((path, PathType::Fanart)) => {
+                Some((path, PathType::Poster)) | Some((path, PathType::Fanart)) | Some((path , PathType::Thumb)) => {
                 // jpg png
                 format!(
                         r#"<div class="brick"><a href="/movie/{}"><img src="/image/{}" style="display:block;float:left;"></img></a></div>"#,
@@ -264,7 +287,7 @@ async fn grid(data: web::Data<Arc<Data>>) -> impl Responder {
                        )
                 },
                 Some((path, PathType::Trailer)) => {
-                if let Some(poster) = &m.poster {
+                if let Some(poster) = &m.poster.choose(&mut rng) {
                 format!(r#"<a href="/movie/{}"><video autoplay muted loop poster="/image/{}"> <source src="/movie/{}" type="video/mp4"> Your browser does not support the video tag.  </video></a>"#,m.movie.display(),poster.display(),path.display())
                 }
                 else {
@@ -272,7 +295,7 @@ async fn grid(data: web::Data<Arc<Data>>) -> impl Responder {
                 }
                 },
                 Some((_path, PathType::Video)) => {
-                if let Some(poster) = &m.poster {
+                if let Some(poster) = &m.poster.choose(&mut rng) {
                 format!(r#"<a href="/movie/{}"><video muted preload=metadata poster="/image/{}"> <source src="/movie/{}" type="video/mp4"> Your browser does not support the video tag.  </video></a>"#,m.movie.display(),poster.display(),m.movie.display())
                 }
                 else{
@@ -540,6 +563,10 @@ async fn main() -> std::io::Result<()> {
                 poster_factor: args
                     .poster_factor
                     .or(file_config.poster_factor)
+                    .unwrap_or_else(|| 1),
+                thumb_factor: args
+                    .thumb_factor
+                    .or(file_config.thumb_factor)
                     .unwrap_or_else(|| 1),
                 fanart_factor: args
                     .fanart_factor
