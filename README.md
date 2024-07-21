@@ -5,13 +5,13 @@ Minimalistic mp4 file server from a Kodi-like organized video collection.
 ## Getting Started
 
 ```bash
-$ cargo run -- -d /location/of/the/folder/with/videos/in/subfolders
+$ random_video_server -d /location/of/the/folder/with/videos/in/subfolders
 ```
 
 more options are explained in the help:
 
 ```bash
-$ cargo run -- -h
+$ random_video_server -h
 ```
 
 ## 127.0.0.1:3070/grid
