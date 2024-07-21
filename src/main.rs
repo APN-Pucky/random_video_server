@@ -1,5 +1,6 @@
 use actix_files::NamedFile;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, Result};
+use glob::glob;
 use rand::seq::SliceRandom;
 use std::fs::read_dir;
 use std::fs::read_to_string;
@@ -11,6 +12,12 @@ use walkdir::WalkDir;
 
 use serde::Deserialize;
 use structopt::StructOpt;
+
+#[derive(Debug, Clone)]
+struct Data {
+    movies: Vec<Movie>,
+    config: Config,
+}
 
 #[derive(Debug, Deserialize, StructOpt, Clone)]
 struct Config {
@@ -64,7 +71,7 @@ struct OptConfig {
     video_factor: Option<i8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Movie {
     movie: PathBuf,
     trailer: Option<PathBuf>,
@@ -80,7 +87,7 @@ enum PathType {
     Fanart,
 }
 
-fn get_random_path(config: &web::Data<Arc<Config>>, movie: &Movie) -> Option<(PathBuf, PathType)> {
+fn get_random_path(config: &Config, movie: &Movie) -> Option<(PathBuf, PathType)> {
     let mut paths = vec![];
 
     for _ in 0..config.trailer_factor {
@@ -134,58 +141,105 @@ fn load_movie_data(root_dir: &String) -> Vec<Movie> {
         // Get the last directory component
         if let Some(name) = f.file_name() {
             if let Some(_dir) = striped(root_dir, f.clone()) {
-                if let Some(movie) = striped(
-                    root_dir,
-                    f.join(format!("{}{}", name.to_string_lossy(), ".mp4")),
-                ) {
-                    let mut poster = None;
-                    let tmp = f.join(format!("{}{}", name.to_string_lossy(), "-poster.jpg"));
-                    if tmp.exists() {
-                        poster = striped(root_dir, tmp);
-                    }
-                    let tmp2 = f.join(format!("{}{}", name.to_string_lossy(), "-poster.png"));
-                    if tmp2.exists() {
-                        poster = striped(root_dir, tmp2);
-                    }
+                // mkv and avi do not work currently in ff/chrome
+                // match all mp4, webm files in the folder usign glob and loop them
+                for ext in ["mp4", "webm"].iter() {
+                    // Movies
+                    for gl in [
+                        &format!("{}/{}.{}", f.display(), name.to_string_lossy(), ext).to_string(),
+                        //&format!("{}/**/{}*.{}", f.display(), name.to_string_lossy(), ext) .to_string(),
+                    ] {
+                        match glob(gl) {
+                            Ok(entries) => {
+                                for entry in entries {
+                                    if let Ok(path) = entry {
+                                        // test that it does not end in -trailer
+                                        if path.display().to_string().contains("-trailer") == false
+                                        {
+                                            if let Some(movie) = striped(root_dir, path) {
+                                                let mut poster = None;
+                                                let tmp = f.join(format!(
+                                                    "{}{}",
+                                                    name.to_string_lossy(),
+                                                    "-poster.jpg"
+                                                ));
+                                                if tmp.exists() {
+                                                    poster = striped(root_dir, tmp);
+                                                }
+                                                let tmp2 = f.join(format!(
+                                                    "{}{}",
+                                                    name.to_string_lossy(),
+                                                    "-poster.png"
+                                                ));
+                                                if tmp2.exists() {
+                                                    poster = striped(root_dir, tmp2);
+                                                }
 
-                    let mut trailer = None;
-                    let tmp3 = f.join(format!("{}{}", name.to_string_lossy(), "-trailer.mp4"));
-                    if tmp3.exists() {
-                        trailer = striped(root_dir, tmp3);
-                    }
+                                                let mut trailer = None;
+                                                let tmp3 = f.join(format!(
+                                                    "{}{}",
+                                                    name.to_string_lossy(),
+                                                    "-trailer.mp4"
+                                                ));
+                                                if tmp3.exists() {
+                                                    trailer = striped(root_dir, tmp3);
+                                                }
 
-                    let extensions = vec!["jpg", "png"];
-                    let fanarts: Vec<PathBuf> = WalkDir::new(f)
-                        .into_iter()
-                        .filter_map(|e| e.ok())
-                        .filter(|e| e.path().is_file())
-                        // string contains ".actors" -> exclude
-                        .filter(|e| e.path().display().to_string().contains(".actors") == false)
-                        .filter(|e| e.path().display().to_string().contains("fanart"))
-                        // check path ends in extension
-                        .filter(|e| {
-                            for extension in &extensions {
-                                if e.path().display().to_string().ends_with(extension) {
-                                    return true;
+                                                let extensions = vec!["jpg", "png"];
+                                                let fanarts: Vec<PathBuf> = WalkDir::new(f.clone())
+                                                    .into_iter()
+                                                    .filter_map(|e| e.ok())
+                                                    .filter(|e| e.path().is_file())
+                                                    // string contains ".actors" -> exclude
+                                                    .filter(|e| {
+                                                        e.path()
+                                                            .display()
+                                                            .to_string()
+                                                            .contains(".actors")
+                                                            == false
+                                                    })
+                                                    .filter(|e| {
+                                                        e.path()
+                                                            .display()
+                                                            .to_string()
+                                                            .contains("fanart")
+                                                    })
+                                                    // check path ends in extension
+                                                    .filter(|e| {
+                                                        for extension in &extensions {
+                                                            if e.path()
+                                                                .display()
+                                                                .to_string()
+                                                                .ends_with(extension)
+                                                            {
+                                                                return true;
+                                                            }
+                                                        }
+                                                        false
+                                                    })
+                                                    .map(|e| {
+                                                        e.path()
+                                                            .strip_prefix(root_dir)
+                                                            .ok()
+                                                            .expect("Should be in root dir")
+                                                            .to_path_buf()
+                                                    })
+                                                    .collect();
+
+                                                movies.push(Movie {
+                                                    movie,
+                                                    poster,
+                                                    trailer,
+                                                    fanarts,
+                                                });
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            false
-                        })
-                        .map(|e| {
-                            e.path()
-                                .strip_prefix(root_dir)
-                                .ok()
-                                .expect("Should be in root dir")
-                                .to_path_buf()
-                        })
-                        .collect();
-
-                    movies.push(Movie {
-                        movie,
-                        poster,
-                        trailer,
-                        fanarts,
-                    });
+                            Err(e) => eprintln!("Error: {}", e),
+                        }
+                    }
                 }
             }
         }
@@ -194,18 +248,19 @@ fn load_movie_data(root_dir: &String) -> Vec<Movie> {
     movies
 }
 
-async fn grid(config: web::Data<Arc<Config>>) -> impl Responder {
+async fn grid(data: web::Data<Arc<Data>>) -> impl Responder {
     let mut rng = rand::thread_rng();
     //let image_data = data.lock().unwrap();
 
     //let image_data = load_image_data(root_dir, &extensions);
     //let random = image_data.choose_multiple(&mut rng, 100);
-    let movies = load_movie_data(&config.directory);
+    //let movies = load_movie_data(&data.config.directory);
+    let movies = &data.movies;
     let random = movies.choose_multiple(&mut rng, 50);
 
     let image_tags: Vec<String> = random
         .map(|m| {
-                match get_random_path(&config,m) {
+                match get_random_path(&data.config,m) {
                 Some((path, PathType::Poster)) | Some((path, PathType::Fanart)) => {
                 // jpg png
                 format!(
@@ -239,7 +294,7 @@ async fn grid(config: web::Data<Arc<Config>>) -> impl Responder {
             <html>
             <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Image Grid</title>
+            <title>Random Video Grid</title>
             <style>
             body {{
 margin: 0;
@@ -315,8 +370,8 @@ document.addEventListener('DOMContentLoaded', function() {{
         .body(html_content)
 }
 
-async fn serve_image(config: web::Data<Arc<Config>>, path: web::Path<String>) -> impl Responder {
-    let root_dir = &config.directory;
+async fn serve_image(data: web::Data<Arc<Data>>, path: web::Path<String>) -> impl Responder {
+    let root_dir = &data.config.directory;
     let p = root_dir.to_owned() + &path.into_inner();
     let path = PathBuf::from(p);
     match is_within_folder(&PathBuf::from(root_dir), &path) {
@@ -332,15 +387,29 @@ async fn serve_image(config: web::Data<Arc<Config>>, path: web::Path<String>) ->
     }
 }
 
+fn ensure_trailing_slash(path_str: String) -> String {
+    // Check if the last character is a slash
+    if !path_str.ends_with(std::path::MAIN_SEPARATOR) {
+        // If not, append a slash
+        let mut r = path_str.clone();
+        r.push(std::path::MAIN_SEPARATOR);
+        r
+    } else {
+        path_str
+    }
+}
+
 fn is_within_folder(folder: &PathBuf, path: &PathBuf) -> Result<bool, String> {
+    // append / if missing from folder
+
     let folder = folder.canonicalize().map_err(|e| e.to_string())?;
     let path = path.canonicalize().map_err(|e| e.to_string())?;
 
     Ok(path.starts_with(&folder))
 }
 
-async fn serve_movie(config: web::Data<Arc<Config>>, path: web::Path<String>) -> impl Responder {
-    let root_dir = &config.directory;
+async fn serve_movie(data: web::Data<Arc<Data>>, path: web::Path<String>) -> impl Responder {
+    let root_dir = &data.config.directory;
     let p = root_dir.to_owned() + &path.into_inner();
     let file_path = PathBuf::from(p);
     match is_within_folder(&PathBuf::from(root_dir), &file_path) {
@@ -349,17 +418,17 @@ async fn serve_movie(config: web::Data<Arc<Config>>, path: web::Path<String>) ->
                 NamedFile::open(&file_path)
                     .map_err(|_| actix_web::error::ErrorNotFound("video not found"))
             } else {
-                Err(actix_web::error::ErrorNotFound("Not found"))
+                Err(actix_web::error::ErrorNotFound("Not within folder"))
             }
         }
-        _ => Err(actix_web::error::ErrorNotFound("Not found")),
+        Err(e) => Err(actix_web::error::ErrorNotFound(e)),
     }
 }
 
-async fn tv(config: web::Data<Arc<Config>>) -> impl Responder {
-    let mut movies = load_movie_data(&config.directory);
-
+async fn tv(data: web::Data<Arc<Data>>) -> impl Responder {
+    //let mut movies = load_movie_data(&data.config.directory);
     let mut rng = rand::thread_rng();
+    let mut movies = data.movies.clone();
     movies.shuffle(&mut rng);
 
     let html_content = format!(
@@ -368,7 +437,7 @@ async fn tv(config: web::Data<Arc<Config>>) -> impl Responder {
             <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Random Video Player</title>
+            <title>Random Video TV</title>
             <style>
             .video-container {{
 position: absolute;
@@ -459,7 +528,7 @@ async fn main() -> std::io::Result<()> {
         Some(directory) => {
             // Merge configurations with command line arguments taking precedence
             let config = Config {
-                directory,
+                directory: ensure_trailing_slash(directory),
                 ip_bind: args
                     .ip_bind
                     .or(file_config.ip_bind)
@@ -485,7 +554,11 @@ async fn main() -> std::io::Result<()> {
                     .or(file_config.video_factor)
                     .unwrap_or_else(|| 0),
             };
-            let config_data = web::Data::new(Arc::new(config.clone()));
+            let data = Data {
+                movies: load_movie_data(&config.directory),
+                config: config.clone(),
+            };
+            let config_data = web::Data::new(Arc::new(data));
             let listen = config.ip_bind + ":" + &config.port_bind.to_string();
             println!("Listening on: http://{}", listen);
 
