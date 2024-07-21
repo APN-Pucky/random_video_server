@@ -24,12 +24,11 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --lib --all-features --target=${{ matrix.triple.target }}
+          args: --all-features --target=${{ matrix.triple.target }}
           use-cross: ${{ matrix.triple.cross }}
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --lib
   
 
   release:
