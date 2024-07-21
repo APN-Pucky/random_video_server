@@ -522,7 +522,8 @@ async fn main() -> std::io::Result<()> {
 
     // Read the configuration file
     let config_content = read_to_string(&config_path).unwrap_or(format!(""));
-    let file_config: OptConfig = toml::from_str(&config_content)?;
+    let file_config: OptConfig = toml::from_str(&config_content)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
     match args.directory.or(file_config.directory) {
         Some(directory) => {
