@@ -98,7 +98,7 @@ jobs:
         if: matrix.triple.os == 'windows-latest'
       
       - name: Load Release URL File from release job
-        uses: actions/download-artifact@v1
+        uses: actions/download-artifact@v4
         with:
           name: release_url
       - name: Get Release File Name & Upload URL
@@ -182,7 +182,7 @@ jobs:
         if: matrix.triple.os == 'windows-latest'
       
       - name: Load Release URL File from release job
-        uses: actions/download-artifact@v1
+        uses: actions/download-artifact@v4
         with:
           name: release_url
       - name: Get Release File Name & Upload URL
