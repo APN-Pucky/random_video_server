@@ -92,9 +92,9 @@ jobs:
         run: mv target/${{ matrix.triple.target }}/release/random_video_server* .
       - name: zip it
         if: matrix.triple.os != 'windows-latest'
-        run: zip ${{ matrix.triple.target }}.zip random_video_server.exe README.md LICENSE
+        run: zip ${{ matrix.triple.target }}.zip random_video_server README.md LICENSE
       - name: zip it
-        run: 7z a ${{ matrix.triple.target }}.zip random_video_server README.md LICENSE
+        run: 7z a ${{ matrix.triple.target }}.zip random_video_server.exe README.md LICENSE
         if: matrix.triple.os == 'windows-latest'
       
       - name: Load Release URL File from release job
@@ -176,9 +176,9 @@ jobs:
         run: mv target/${{ matrix.triple.target }}/debug/random_video_server* .
       - name: zip it
         if: matrix.triple.os != 'windows-latest'
-        run: zip ${{ matrix.triple.target }}.zip random_video_server.exe README.md LICENSE
+        run: zip ${{ matrix.triple.target }}.zip random_video_server README.md LICENSE
       - name: zip it
-        run: 7z a ${{ matrix.triple.target }}.zip random_video_server README.md LICENSE
+        run: 7z a ${{ matrix.triple.target }}.zip random_video_server.exe README.md LICENSE
         if: matrix.triple.os == 'windows-latest'
       
       - name: Load Release URL File from release job
